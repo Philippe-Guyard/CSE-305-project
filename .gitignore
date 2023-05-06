@@ -30,7 +30,7 @@
 *.exe
 *.out
 *.app
-sphere
+main
 
 # Cmake files 
 CMakeCache.txt
@@ -41,5 +41,3 @@ install_manifest.txt
 
 # Visual Studio Code files
 .vscode
-
-main 
