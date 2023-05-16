@@ -94,4 +94,6 @@ Graph make_random_graph(int n = -1) {
                 g.add_edge(u, v, uniform(engine));
         }
     }
+
+    return g;
 }
