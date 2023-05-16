@@ -2,6 +2,7 @@
 #include <vector>
 #include <limits>
 #include <unordered_set>
+#include <fstream>
 
 #include "graph.hpp"    
 
@@ -129,6 +130,19 @@ int main() {
     for (size_t i = 0; i < res.size(); i++) {
         std::cout << i << ": " << res[i] << std::endl;
     }
+
+    // To serialize a graph
+    // std::ofstream out;
+    // out.open("graph.txt", std::fstream::out);
+    // out << g;
+    // out.close();
+
+    // To read a graph
+    // std::ifstream in;
+    // in.open("graph.txt", std::fstream::in);
+    // in >> g;
+    // std::cout << g.num_vertices();
+    // in.close();
 
     return 0;
 }
