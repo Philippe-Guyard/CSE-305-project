@@ -1,70 +1,70 @@
 #include <iostream>
 #include <vector>
 #include <queue>
-#include <limits.h>
+#include <limits>
+#include "graph.hpp"
 
-#define N 5
-#define INF INT_MAX
-#define startNode 0
-
-int printSolution(std::vector<int> distances)
+// Function to perform Dijkstra's algorithm
+void dijkstra(const Graph &graph, vertex_t source)
 {
-    printf("Vertex Distance from Source\n");
-    for (int i = 0; i < N; i++)
-        printf("%d \t\t %d\n", i, distances[i]);
-}
+    int n = graph.num_vertices();
 
-void dijkstra(int graph[N][N])
-{
-    // step 1: Initialization
+    // Initialize distances to infinity for all vertices except the source
+    std::vector<double> distances(n, std::numeric_limits<double>::infinity());
+    distances[source] = 0;
 
-    //  Set distances of all nodes to infinity except of start node to 0
-    std::vector<int> distances(N, INT_MAX);
-    distances[startNode] = 0;
+    // Priority queue to store vertices and their distances
+    std::priority_queue<std::pair<double, vertex_t>, std::vector<std::pair<double, vertex_t>>, std::greater<std::pair<double, vertex_t>>> pq;
+    pq.push({0, source});
 
-    //  Set all nodes to unvisited
-    std::vector<bool> visited(N, false);
-
-    // step 2: Find the smallest distances from current node
-    for (int i = 0; i < N; i++)
+    while (!pq.empty())
     {
+        vertex_t u = pq.top().second;
+        pq.pop();
 
-        //  Find the node with the smallest distance
-        int currentNode = -1;
-        for (int j = 0; j < N; j++)
+        // Iterate through all neighboring vertices of u
+        for (const Edge &edge : graph.edges_from(u))
         {
-            if (!visited[j] && (currentNode == -1 || distances[j] < distances[currentNode]))
-            {
-                currentNode = j;
-            }
-        }
+            vertex_t v = edge.to;
+            double weight = edge.weight;
 
-        //  Mark the current node as visited
-        visited[currentNode] = true;
-
-        //  step 3: Update the distances of the neighbors of the current node
-        for (int j = 0; j < N; j++)
-        {
-            if (graph[currentNode][j] != 0 && distances[currentNode] + graph[currentNode][j] < distances[j])
+            // Relax the edge (u, v)
+            if (distances[u] + weight < distances[v])
             {
-                distances[j] = distances[currentNode] + graph[currentNode][j];
+                distances[v] = distances[u] + weight;
+                pq.push({distances[v], v});
             }
         }
     }
-    // printf("Distance from %d to %d is %d\n", startNode, targetNode, distances[targetNode]);
-    printSolution(distances);
+
     return;
 }
 
-int main()
-{
-    int graph[N][N] = {
-        {0, 1, 0, 0, 0},
-        {1, 0, 2, 0, 0},
-        {0, 2, 0, 3, 0},
-        {0, 0, 3, 0, 4},
-        {0, 0, 0, 4, 0}};
+// this was to check if the graph was being generated correctly and if dijkstra was working
+//  change the outpute type in dijkstra to vector<double> and uncomment the main function
+//  int main()
+//  {
+//      // Create a sample graph using the Graph class
+//      Graph graph(6);
+//      graph.add_edge(0, 1, 2);
+//      graph.add_edge(0, 2, 5);
+//      graph.add_edge(1, 3, 4);
+//      graph.add_edge(1, 4, 7);
+//      graph.add_edge(2, 4, 1);
+//      graph.add_edge(3, 5, 3);
+//      graph.add_edge(4, 3, 2);
+//      graph.add_edge(4, 5, 6);
 
-    dijkstra(graph);
-    return 0;
-}
+//     vertex_t source = 0;
+
+//     // Run Dijkstra's algorithm
+//     vector<double> distances = dijkstra(graph, source);
+
+//     // Print the distances from the source to all other vertices
+//     for (vertex_t v = 0; v < graph.num_vertices(); ++v)
+//     {
+//         cout << "Distance from " << source << " to " << v << ": " << distances[v] << endl;
+//     }
+
+//     return 0;
+// }
