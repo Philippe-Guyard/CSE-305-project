@@ -11,6 +11,7 @@ set(CMAKE_CXX_FLAGS_DEBUG "-g")
 set(CMAKE_CXX_FLAGS_RELEASE "-O3")
 
 set(SOURCES main.cpp
-            graph.hpp)
+            graph.hpp
+            buckets.hpp)
 
 add_executable(main ${SOURCES})
