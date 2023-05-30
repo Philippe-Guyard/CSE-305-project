@@ -1,8 +1,0 @@
-[
-{
-  "directory": "/Users/minagoranovic/Desktop/CSE-305-project/build",
-  "command": "/usr/local/bin/g++-13   -Wall -Wextra -pthread -std=c++17 -g -std=gnu++17 -isysroot /Library/Developer/CommandLineTools/SDKs/MacOSX13.0.sdk -o CMakeFiles/main.dir/main.cpp.o -c /Users/minagoranovic/Desktop/CSE-305-project/main.cpp",
-  "file": "/Users/minagoranovic/Desktop/CSE-305-project/main.cpp",
-  "output": "CMakeFiles/main.dir/main.cpp.o"
-}
-]
