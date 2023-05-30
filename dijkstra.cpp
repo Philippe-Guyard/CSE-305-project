@@ -5,7 +5,7 @@
 #include "graph.hpp"
 
 // Function to perform Dijkstra's algorithm
-void dijkstra(const Graph &graph, vertex_t source)
+std::vector<double> dijkstra(const Graph &graph, vertex_t source)
 {
     int n = graph.num_vertices();
 
@@ -37,7 +37,7 @@ void dijkstra(const Graph &graph, vertex_t source)
         }
     }
 
-    return;
+    return distances;
 }
 
 // this was to check if the graph was being generated correctly and if dijkstra was working
