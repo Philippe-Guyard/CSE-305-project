@@ -10,6 +10,7 @@
 #include "dijkstra.cpp"
 #include "graph.hpp"
 #include "test.cpp"
+#include "benchmarker.hpp"
 
 using dist_vector = std::vector<double>;
 
@@ -25,6 +26,7 @@ private:
     double delta;
 
     void relax(Edge e) {
+        Benchmarker::start_one("relax");
         double x = e.weight;
         vertex_t w = e.to;
 
@@ -38,6 +40,7 @@ private:
             buckets->insert(dest_bucket_index, w);
             distances[w] = x;
         }
+        Benchmarker::end_one("relax");
     }
 
     bool edge_is_kind(const Edge &e, edge_type kind) const {
@@ -50,6 +53,7 @@ private:
 
     template <typename Iterator>
     std::vector<Edge> find_requests(Iterator begin, Iterator end, edge_type kind) const {
+        Benchmarker::start_one("find_requests");
         std::vector<Edge> res = {};
         for (auto it = begin; it != end; it++) {
             vertex_t v = *it;
@@ -62,15 +66,16 @@ private:
             }
         }
 
+        Benchmarker::end_one("find_requests");
         return std::move(res);
     }
 
     static void find_requests_thread(DeltaSteppingSolver *sol, const std::vector<vertex_t> &R_vec,
                                      size_t start, size_t end, std::vector<Edge> &result,
-                                     DeltaSteppingSolver::edge_type kind, const std::vector<double> &distances) {
+                                     DeltaSteppingSolver::edge_type kind) {
         for (size_t j = start; j < end; ++j) {
             for (Edge e : sol->graph.edges_from(R_vec[j])) {
-                if (sol->edge_is_kind(e, kind) && e.weight + distances[R_vec[j]] < sol->distances[e.to]) {
+                if (sol->edge_is_kind(e, kind) && e.weight + sol->distances[R_vec[j]] < sol->distances[e.to]) {
                     result.push_back({e.to, e.weight + sol->distances[R_vec[j]]});
                 }
             }
@@ -81,18 +86,19 @@ private:
     // This is the improvement from section 4 of the paper
     template <typename Iterator>
     std::vector<Edge> find_requests_parallel(Iterator begin, Iterator end, edge_type kind, size_t num_threads) {
+        Benchmarker::start_one("find_requests_parallel");
         // Another copy... Slow
         std::vector<vertex_t> R_vec(begin, end);
         size_t chunk_size = R_vec.size() / num_threads;
         std::vector<std::vector<Edge>> results(num_threads - 1);
         std::vector<std::thread> threads(num_threads - 1);
         for (size_t i = 0; i < num_threads - 1; i++) {
-            threads[i] = std::thread(find_requests_thread, this, std::cref(R_vec), i * chunk_size, (i + 1) * chunk_size, std::ref(results[i]), kind, std::cref(distances));
+            threads[i] = std::thread(find_requests_thread, this, std::cref(R_vec), i * chunk_size, (i + 1) * chunk_size, std::ref(results[i]), kind);
         }
         size_t last_chunk_start = (num_threads - 1) * chunk_size;
         std::vector<Edge> res;
         // Push to res immediately to avoid unnecessary copying
-        find_requests_thread(this, R_vec, last_chunk_start, R_vec.size(), res, kind, distances);
+        find_requests_thread(this, R_vec, last_chunk_start, R_vec.size(), res, kind);
 
         for (size_t i = 0; i < num_threads - 1; i++) {
             threads[i].join();
@@ -104,6 +110,7 @@ private:
                 res.insert(res.end(), results[i].begin(), results[i].end());
         }
 
+        Benchmarker::end_one("find_requests_parallel");
         return std::move(res);
     }
 
@@ -325,20 +332,29 @@ int main() {
 
     const double delta = 0.1;
     DeltaSteppingSolver solver(g, false);
-    auto start = std::chrono::high_resolution_clock::now();
+    
+    Benchmarker::start_one("Total");
     auto res = solver.solve(0, delta);
-    auto end = std::chrono::high_resolution_clock::now();
-    std::cout << "Sequential (delta = " << delta << "): " << std::chrono::duration_cast<std::chrono::milliseconds>(end - start).count() << std::endl;
+    Benchmarker::end_one("Total");
+    std::cout << "Sequential (delta = " << delta << ") benchmarking summary:" << std::endl;
+    Benchmarker::print_summary(std::cout);
+    std::cout << std::endl;
 
-    start = std::chrono::high_resolution_clock::now();
+    Benchmarker::clear();
+
     size_t num_threads = 8;
+    Benchmarker::start_one("Total");
     auto resPara = solver.solve_parallel_simple(0, delta, num_threads);
-    end = std::chrono::high_resolution_clock::now();
-    std::cout << "Parallel (with " << num_threads << " threads): " << std::chrono::duration_cast<std::chrono::milliseconds>(end - start).count() << std::endl;
+    Benchmarker::end_one("Total");
+    std::cout << "Parallel (with " << num_threads << " threads) benchmarking summary:" << std::endl;
+    Benchmarker::print_summary(std::cout);
+    std::cout << std::endl;
 
-    start = std::chrono::high_resolution_clock::now();
+    Benchmarker::clear();
+
+    auto start = std::chrono::high_resolution_clock::now();
     auto resDijkstra = dijkstra(g, 0);
-    end = std::chrono::high_resolution_clock::now();
+    auto end = std::chrono::high_resolution_clock::now();
     std::cout << "Dijkstra: " << std::chrono::duration_cast<std::chrono::milliseconds>(end - start).count() << std::endl;
 
     for (size_t i = 0; i < res.size(); i++) {
