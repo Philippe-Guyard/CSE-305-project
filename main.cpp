@@ -5,11 +5,11 @@
 #include <thread>
 #include <unordered_set>
 #include <vector>
+#include <memory>
 
 #include "buckets.hpp"
 #include "dijkstra.cpp"
 #include "graph.hpp"
-#include "test.cpp"
 #include "benchmarker.hpp"
 
 using dist_vector = std::vector<double>;
@@ -115,14 +115,16 @@ private:
     }
 
     void relax_requests(const std::vector<Edge> &requests) {
-        for (Edge e : requests) {
+        Benchmarker::start_one("relax_requests");
+        for (const Edge& e : requests) {
             relax(e);
         }
+        Benchmarker::end_one("relax_requests");
     }
 
 public:
     // Idk why I do it like this, architecture is weird...
-    DeltaSteppingSolver(const Graph &g, bool use_simple = true) : graph(g) {
+    DeltaSteppingSolver(const Graph &g, bool use_simple = true): graph(g) {
         if (use_simple)
             buckets = std::make_unique<SimpleBucketList>();
         else
@@ -310,7 +312,10 @@ int main() {
     // g.add_edge(F, G, 11);
     // g.add_edge(G, H, 15);
 
-    Graph g = make_connected_enough_graph(10000);
+    const size_t N = 5000;
+    Graph g = GraphGenerator::make_random_connected_graph(N);
+    std::cout << "G has " << g.num_vertices() << " vertices and " << g.num_edges() << " edges" << std::endl;
+    std::cout << std::endl;
 
     // we don't print any weights here
     // for (size_t i = 0; i < g.num_vertices(); i++)
@@ -332,7 +337,7 @@ int main() {
 
     const double delta = 0.1;
     DeltaSteppingSolver solver(g, false);
-    
+
     Benchmarker::start_one("Total");
     auto res = solver.solve(0, delta);
     Benchmarker::end_one("Total");
@@ -377,13 +382,13 @@ int main() {
 
     // To serialize a graph
     // std::ofstream out;
-    // out.open("graph.txt", std::fstream::out);
+    // out.open("graph->txt", std::fstream::out);
     // out << g;
     // out.close();
 
     // To read a graph
     // std::ifstream in;
-    // in.open("graph.txt", std::fstream::in);
+    // in.open("graph->txt", std::fstream::in);
     // in >> g;
     // std::cout << g.num_vertices();
     // in.close();
