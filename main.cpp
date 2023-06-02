@@ -25,8 +25,10 @@ private:
     const Graph &graph;
     double delta;
 
-    void relax(Edge e) {
-        Benchmarker::start_one("relax");
+    void relax(const Edge& e) {
+        // NOTE: Benchmarking in this function makes it significantly slower
+        // Due to the internals of the Benchmarker class
+        // Benchmarker::start_one("relax");
         double x = e.weight;
         vertex_t w = e.to;
 
@@ -40,10 +42,10 @@ private:
             buckets->insert(dest_bucket_index, w);
             distances[w] = x;
         }
-        Benchmarker::end_one("relax");
+        // Benchmarker::end_one("relax");
     }
 
-    bool edge_is_kind(const Edge &e, edge_type kind) const {
+    bool edge_is_kind(const Edge &e, edge_type kind) {
         if (kind == light) {
             return e.weight <= delta;
         } else {
@@ -52,7 +54,7 @@ private:
     }
 
     template <typename Iterator>
-    std::vector<Edge> find_requests(Iterator begin, Iterator end, edge_type kind) const {
+    std::vector<Edge> find_requests(Iterator begin, Iterator end, edge_type kind) {
         Benchmarker::start_one("find_requests");
         std::vector<Edge> res = {};
         for (auto it = begin; it != end; it++) {
@@ -88,7 +90,9 @@ private:
     std::vector<Edge> find_requests_parallel(Iterator begin, Iterator end, edge_type kind, size_t num_threads) {
         Benchmarker::start_one("find_requests_parallel");
         // Another copy... Slow
+        Benchmarker::start_one("Copying");
         std::vector<vertex_t> R_vec(begin, end);
+        Benchmarker::end_one("Copying");
         size_t chunk_size = R_vec.size() / num_threads;
         std::vector<std::vector<Edge>> results(num_threads - 1);
         std::vector<std::thread> threads(num_threads - 1);
@@ -101,13 +105,17 @@ private:
         find_requests_thread(this, R_vec, last_chunk_start, R_vec.size(), res, kind);
 
         for (size_t i = 0; i < num_threads - 1; i++) {
+            Benchmarker::start_one("Joining");
             threads[i].join();
+            Benchmarker::end_one("Joining");
         }
 
         // NOTE: This combining might be quite slow. Is there a faster way to parallelize?
         for (size_t i = 0; i < num_threads - 1; i++) {
+            Benchmarker::start_one("Copying");
             if (results[i].size() > 0)
                 res.insert(res.end(), results[i].begin(), results[i].end());
+            Benchmarker::end_one("Copying");
         }
 
         Benchmarker::end_one("find_requests_parallel");
@@ -120,6 +128,55 @@ private:
             relax(e);
         }
         Benchmarker::end_one("relax_requests");
+    }
+
+    std::unordered_map<vertex_t, std::vector<Edge>> find_shortcuts_simple(vertex_t u) {
+        Benchmarker::start_one("find_shortcuts_simple");
+        HashArray<UEdge, double> found(std::numeric_limits<double>::infinity());
+        std::unordered_set<DEdge> Q;
+        // To have them in sorted order
+        HashArray<UEdge, double> Q_dash(std::numeric_limits<double>::infinity());
+        Q.insert(DEdge(u, u, 0));
+        while (!Q.empty()) {
+            Q_dash.clear();
+            for(auto d_edge : Q) {
+                size_t u = d_edge.from;
+                size_t v = d_edge.to;
+                double x = d_edge.weight;
+                for (auto edge : graph.edges_from(v)) {
+                    size_t w = edge.to;
+                    double c = edge.weight;
+                    // For single thread, immediately insert the minimum to avoid 
+                    // storing the whole multiset 
+                    if (edge_is_kind(edge, light) && x + c < Q_dash.get(UEdge(u, w))) {
+                        Q_dash.insert(UEdge(u, w), x + c);
+                    }
+                }
+            }
+
+            Q.clear();
+            for(auto it = Q_dash.begin(); it != Q_dash.end(); it++) {
+                vertex_t u = it->first.from;
+                vertex_t v = it->first.to;
+                double x = it->second;
+                // filter by delta <= x < found(u, v)
+                if (x >= delta || x > found.get(UEdge(u, v))) {
+                    continue;
+                }
+
+                Q.insert(DEdge(u, v, x));
+                found.insert(UEdge(u, v), x);
+            }
+        }
+        std::unordered_map<vertex_t, std::vector<Edge>> shortcuts_from;
+        for(auto it = found.begin(); it != found.end(); it++) {
+            vertex_t u = it->first.from;
+            vertex_t v = it->first.to;
+            double x = it->second;
+            shortcuts_from[u].push_back(Edge({v, x}));
+        }
+        Benchmarker::end_one("find_shortcuts_simple");
+        return shortcuts_from;
     }
 
 public:
@@ -181,6 +238,55 @@ public:
             relax_requests(requests);
         }
 
+        return distances;
+    }
+
+    dist_vector solve_shortcuts(vertex_t source, double delta) {
+        this->delta = delta;
+        distances = dist_vector(graph.num_vertices(), std::numeric_limits<double>::infinity());
+        buckets->clear();
+        auto shortcuts_from = find_shortcuts_simple(source);
+        relax({source, 0});
+        int i = -1;
+        while (!buckets->empty()) {
+            auto opt_i = buckets->first_non_empty_bucket(i);
+            if (!opt_i.has_value()) 
+                break;
+            
+            i = opt_i.value();
+            for(auto it = buckets->begin_of(i); it != buckets->end_of(i); it++) {
+                vertex_t v = *it;
+                for (const Edge &e : graph.edges_from(v)) {
+                    if (distances[v] + e.weight <= (i + 1) * delta) {
+                        relax({e.to, distances[v] + e.weight});
+                    }
+                }
+                for(const Edge& e: shortcuts_from[v]) {
+                    if (distances[v] + e.weight <= (i + 1) * delta) {
+                        relax({e.to, distances[v] + e.weight});
+                    }
+                }
+            }
+            for(auto it = buckets->begin_of(i); it != buckets->end_of(i); it++) {
+                vertex_t v = *it;
+                for (const Edge &e : graph.edges_from(v)) {
+                    if (distances[v] + e.weight > (i + 1) * this->delta) {
+                        relax({e.to, distances[v] + e.weight});
+                    }
+                }
+                for(const Edge& e: shortcuts_from[v]) {
+                    if (distances[v] + e.weight > (i + 1) * this->delta) {
+                        relax({e.to, distances[v] + e.weight});
+                    }
+                }
+            }
+        }
+
+        return distances;
+    }
+
+    dist_vector solve_shortcuts_parallel(vertex_t source, double delta) {
+        // TODO:
         return distances;
     }
 
@@ -317,24 +423,6 @@ int main() {
     std::cout << "G has " << g.num_vertices() << " vertices and " << g.num_edges() << " edges" << std::endl;
     std::cout << std::endl;
 
-    // we don't print any weights here
-    // for (size_t i = 0; i < g.num_vertices(); i++)
-    // {
-    //     std::cout << i << ": "; // prints the vertex number
-    //     for (Edge e : g.edges_from(i))
-    //     {
-    //         std::cout << e.to << " "; // prints the all the destination vertices numbers
-    //     }
-    //     std::cout << std::endl;
-    // }
-    // for (size_t i = 0; i < g.num_vertices(); i++) {
-    //     std::cout << i << ": ";
-    //     for (Edge e : g.edges_from(i)) {
-    //         std::cout << e.to << " ";
-    //     }
-    //     std::cout << std::endl;
-    // }
-
     const double delta = 0.1;
     DeltaSteppingSolver solver(g, false);
 
@@ -347,7 +435,7 @@ int main() {
 
     Benchmarker::clear();
 
-    size_t num_threads = 8;
+    size_t num_threads = 16;
     Benchmarker::start_one("Total");
     auto resPara = solver.solve_parallel_simple(0, delta, num_threads);
     Benchmarker::end_one("Total");
@@ -357,16 +445,27 @@ int main() {
 
     Benchmarker::clear();
 
+    Benchmarker::start_one("Total");
+    auto resShortcuts = solver.solve_shortcuts(0, delta);
+    Benchmarker::end_one("Total");
+    std::cout << "Sequential with shortcuts (delta = " << delta << ") benchmarking summary:" << std::endl;
+    Benchmarker::print_summary(std::cout);
+    std::cout << std::endl;
+
+    Benchmarker::clear();
+
     auto start = std::chrono::high_resolution_clock::now();
     auto resDijkstra = dijkstra(g, 0);
     auto end = std::chrono::high_resolution_clock::now();
-    std::cout << "Dijkstra: " << std::chrono::duration_cast<std::chrono::milliseconds>(end - start).count() << std::endl;
+    std::cout << "Dijkstra: " << std::chrono::duration_cast<std::chrono::milliseconds>(end - start).count() << "ms" << std::endl;
 
     for (size_t i = 0; i < res.size(); i++) {
-        if (res[i] != resDijkstra[i] || res[i] != resPara[i]) {
-            std::cout << "ERROR: " << i << ": " << res[i] << " != " << resDijkstra[i];
-            std::cout << " or " << res[i] << " != " << resPara[i] << std::endl;
-        }
+        if (resDijkstra[i] != res[i])
+            std::cout << "ERROR in simple solve: " << i << ": " << resDijkstra[i] << " != " << res[i] << std::endl;
+        if (resDijkstra[i] != resPara[i])
+            std::cout << "ERROR in parallel solve: " << i << ": " << resDijkstra[i] << " != " << resPara[i] << std::endl;
+        if (resDijkstra[i] != resShortcuts[i]) 
+            std::cout << "ERROR in shortcuts solve: " << i << ": " << resDijkstra[i] << " != " << resShortcuts[i] << std::endl;
     }
 
     // for (size_t i = 0; i < res.size(); i++)
@@ -382,13 +481,13 @@ int main() {
 
     // To serialize a graph
     // std::ofstream out;
-    // out.open("graph->txt", std::fstream::out);
+    // out.open("graph.txt", std::fstream::out);
     // out << g;
     // out.close();
 
     // To read a graph
     // std::ifstream in;
-    // in.open("graph->txt", std::fstream::in);
+    // in.open("graph.txt", std::fstream::in);
     // in >> g;
     // std::cout << g.num_vertices();
     // in.close();

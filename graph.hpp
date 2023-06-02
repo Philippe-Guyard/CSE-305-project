@@ -28,12 +28,14 @@ struct DEdge {
     vertex_t from, to;
     edge_weight weight;
 
+    DEdge(vertex_t f, vertex_t t, edge_weight w) : from(f), to(t), weight(w) {}
+
     bool operator==(const DEdge &other) const {
         return from == other.from && to == other.to && weight == other.weight;
     }
 
     bool operator<(const DEdge &other) const {
-        return from <= other.from || to <= other.to;
+        return from < other.from || to < other.to || weight < other.weight;
     }
 };
 
@@ -102,6 +104,18 @@ public:
             return it->second;
         }
         return defaultValue;
+    }
+
+    void clear() {
+        dict.clear();
+    }
+
+    auto begin() const {
+        return dict.begin();
+    }
+
+    auto end() const {
+        return dict.end();
     }
 };
 
