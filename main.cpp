@@ -15,6 +15,8 @@
 using dist_vector = std::vector<double>;
 
 class DeltaSteppingSolver {
+using shortcut_array = std::unordered_map<vertex_t, std::vector<Edge>>;
+
 private:
     enum edge_type {
         light,
@@ -130,13 +132,24 @@ private:
         Benchmarker::end_one("relax_requests");
     }
 
-    std::unordered_map<vertex_t, std::vector<Edge>> find_shortcuts_simple(vertex_t u) {
+    shortcut_array to_shortcut_array(const HashArray<UEdge, double>& found) {
+        shortcut_array shortcuts_from;
+        for(auto it = found.begin(); it != found.end(); it++) {
+            vertex_t u = it->first.from;
+            vertex_t v = it->first.to;
+            double x = it->second;
+            shortcuts_from[u].push_back(Edge({v, x}));
+        }
+        return shortcuts_from;
+    }
+
+    shortcut_array find_shortcuts_simple(vertex_t source) {
         Benchmarker::start_one("find_shortcuts_simple");
         HashArray<UEdge, double> found(std::numeric_limits<double>::infinity());
         std::unordered_set<DEdge> Q;
         // To have them in sorted order
         HashArray<UEdge, double> Q_dash(std::numeric_limits<double>::infinity());
-        Q.insert(DEdge(u, u, 0));
+        Q.insert(DEdge(source, source, 0));
         while (!Q.empty()) {
             Q_dash.clear();
             for(auto d_edge : Q) {
@@ -168,15 +181,132 @@ private:
                 found.insert(UEdge(u, v), x);
             }
         }
-        std::unordered_map<vertex_t, std::vector<Edge>> shortcuts_from;
-        for(auto it = found.begin(); it != found.end(); it++) {
-            vertex_t u = it->first.from;
-            vertex_t v = it->first.to;
-            double x = it->second;
-            shortcuts_from[u].push_back(Edge({v, x}));
-        }
+
+        auto shortcuts_from = to_shortcut_array(found);
         Benchmarker::end_one("find_shortcuts_simple");
         return shortcuts_from;
+    }
+
+    static void find_shortcuts_thread(DeltaSteppingSolver *sol, const std::vector<DEdge>& Q, size_t idx_start, size_t idx_end,
+                                      HashArray<UEdge, double>& Q_dash, const HashArray<UEdge, double>& found) {
+        for(size_t i = idx_start; i < idx_end; i++) {
+            size_t u = Q[i].from;
+            size_t v = Q[i].to;
+            double x = Q[i].weight;
+            for (auto edge : sol->graph.edges_from(v)) {
+                size_t w = edge.to;
+                double c = edge.weight;
+                auto edge_key = UEdge(u, w);
+                // NOTE: We are immediately doing the filtering of x <= delta and x < found 
+                // as well as immediately computing minimums on insertion to Q_dash.
+                // It is ok to filter now, since the edges that do not satisfy these conditions
+                // would not be inserted into Q_dash anyway
+                double cur_best = std::fmin(found.get(edge_key), Q_dash.get(edge_key));
+                if (x + c <= sol->delta && x + c < cur_best) {
+                    Q_dash.insert(edge_key, x + c);
+                }
+            }
+        }
+    }
+
+    std::unordered_map<vertex_t, std::vector<Edge>> find_shortcuts_parallel(vertex_t source, size_t num_threads) {
+        Benchmarker::start_one("find_shortcuts_parallel");
+        HashArray<UEdge, double> found(std::numeric_limits<double>::infinity());
+        std::vector<DEdge> Q;
+        std::vector<HashArray<UEdge, double>> Q_dash(num_threads, HashArray<UEdge, double>(std::numeric_limits<double>::infinity()));
+        Q.push_back(DEdge(source, source, 0));
+        while (!Q.empty()){            
+            Benchmarker::start_one("Computing Q_dash");
+            size_t chunk_size = Q.size() / num_threads;
+            std::vector<std::thread> threads(num_threads - 1);
+            for (size_t i = 0; i < num_threads - 1; i++) {
+                Q_dash[i].clear();
+                threads[i] = std::thread(find_shortcuts_thread, this, std::cref(Q), i * chunk_size, 
+                                                                (i + 1) * chunk_size, std::ref(Q_dash[i]), 
+                                                                std::cref(found));
+            }
+            
+            size_t last_chunk_start = (num_threads - 1) * chunk_size;
+            Q_dash[num_threads - 1].clear();
+            find_shortcuts_thread(this, Q, last_chunk_start, Q.size(), Q_dash[num_threads - 1], found);
+            Benchmarker::start_one("Joining");
+            for(size_t i = 0; i < num_threads - 1; i++) 
+                threads[i].join();
+            Benchmarker::end_one("Joining");
+            
+            Benchmarker::end_one("Computing Q_dash");
+
+            Q.clear();
+            
+            // Now compute min(Q_dash[i].get(u, v)) for all (u, v) and put it in found 
+            Benchmarker::start_one("Updating Q");
+            HashArray<UEdge, bool> visited(false);
+            for(size_t i = 0; i < num_threads; i++) {
+                for(auto it = Q_dash[i].begin(); it != Q_dash[i].end(); it++) {
+                    vertex_t u = it->first.from;
+                    vertex_t v = it->first.to;
+                    auto edge_key = UEdge(u, v);
+                    if (visited.get(edge_key)) 
+                        continue;
+                    
+                    visited.insert(edge_key, true);
+                    double min_val = it->second;
+                    // We can start from i + 1, since {u, v} is not visited, hence Q_dash[j < i].get(u, v) == inf
+                    for(size_t j = i + 1; j < num_threads; j++) 
+                        min_val = std::fmin(min_val, Q_dash[j].get(edge_key));
+                    
+                    if (min_val < found.get(edge_key)) {
+                        found.insert(edge_key, min_val); 
+                        Q.emplace_back(DEdge(u, v, min_val));                  
+                    }
+                }
+            }
+            Benchmarker::end_one("Updating Q");
+        }
+
+        auto shortcuts_from = to_shortcut_array(found);
+        Benchmarker::end_one("find_shortcuts_parallel");
+        return shortcuts_from;
+    }  
+
+    void solve_shortcuts_base(shortcut_array& shortcuts_from, vertex_t source) {
+        distances = dist_vector(graph.num_vertices(), std::numeric_limits<double>::infinity());
+        buckets->clear();
+        relax({source, 0});
+        int i = -1;
+        while (!buckets->empty()) {
+            auto opt_i = buckets->first_non_empty_bucket(i);
+            if (!opt_i.has_value()) 
+                break;
+            
+            i = opt_i.value();
+            for(auto it = buckets->begin_of(i); it != buckets->end_of(i); it++) {
+                vertex_t v = *it;
+                for (const Edge &e : graph.edges_from(v)) {
+                    if (distances[v] + e.weight <= (i + 1) * delta) {
+                        relax({e.to, distances[v] + e.weight});
+                    }
+                }
+                for(const Edge& e: shortcuts_from[v]) {
+                    if (distances[v] + e.weight <= (i + 1) * delta) {
+                        relax({e.to, distances[v] + e.weight});
+                    }
+                }
+            }
+            for(auto it = buckets->begin_of(i); it != buckets->end_of(i); it++) {
+                vertex_t v = *it;
+                for (const Edge &e : graph.edges_from(v)) {
+                    if (distances[v] + e.weight > (i + 1) * this->delta) {
+                        relax({e.to, distances[v] + e.weight});
+                    }
+                }
+                for(const Edge& e: shortcuts_from[v]) {
+                    if (distances[v] + e.weight > (i + 1) * this->delta) {
+                        relax({e.to, distances[v] + e.weight});
+                    }
+                }
+            }
+        }
     }
 
 public:
@@ -243,50 +373,15 @@ public:
 
     dist_vector solve_shortcuts(vertex_t source, double delta) {
         this->delta = delta;
-        distances = dist_vector(graph.num_vertices(), std::numeric_limits<double>::infinity());
-        buckets->clear();
         auto shortcuts_from = find_shortcuts_simple(source);
-        relax({source, 0});
-        int i = -1;
-        while (!buckets->empty()) {
-            auto opt_i = buckets->first_non_empty_bucket(i);
-            if (!opt_i.has_value()) 
-                break;
-            
-            i = opt_i.value();
-            for(auto it = buckets->begin_of(i); it != buckets->end_of(i); it++) {
-                vertex_t v = *it;
-                for (const Edge &e : graph.edges_from(v)) {
-                    if (distances[v] + e.weight <= (i + 1) * delta) {
-                        relax({e.to, distances[v] + e.weight});
-                    }
-                }
-                for(const Edge& e: shortcuts_from[v]) {
-                    if (distances[v] + e.weight <= (i + 1) * delta) {
-                        relax({e.to, distances[v] + e.weight});
-                    }
-                }
-            }
-            for(auto it = buckets->begin_of(i); it != buckets->end_of(i); it++) {
-                vertex_t v = *it;
-                for (const Edge &e : graph.edges_from(v)) {
-                    if (distances[v] + e.weight > (i + 1) * this->delta) {
-                        relax({e.to, distances[v] + e.weight});
-                    }
-                }
-                for(const Edge& e: shortcuts_from[v]) {
-                    if (distances[v] + e.weight > (i + 1) * this->delta) {
-                        relax({e.to, distances[v] + e.weight});
-                    }
-                }
-            }
-        }
-
+        solve_shortcuts_base(shortcuts_from, source);
         return distances;
     }
 
-    dist_vector solve_shortcuts_parallel(vertex_t source, double delta) {
-        // TODO:
+    dist_vector solve_shortcuts_parallel(vertex_t source, double delta, size_t num_threads) {
+        this->delta = delta;
+        auto shortcuts_from = find_shortcuts_parallel(source, num_threads);
+        solve_shortcuts_base(shortcuts_from, source);
         return distances;
     }
 
@@ -435,7 +530,7 @@ int main() {
 
     Benchmarker::clear();
 
-    size_t num_threads = 16;
+    size_t num_threads = 20;
     Benchmarker::start_one("Total");
     auto resPara = solver.solve_parallel_simple(0, delta, num_threads);
     Benchmarker::end_one("Total");
@@ -454,6 +549,15 @@ int main() {
 
     Benchmarker::clear();
 
+    Benchmarker::start_one("Total");
+    auto resShortcutsPara = solver.solve_shortcuts_parallel(0, delta, num_threads);
+    Benchmarker::end_one("Total");
+    std::cout << "Parallel with shortcuts (with " << num_threads << " threads) benchmarking summary:" << std::endl;
+    Benchmarker::print_summary(std::cout);
+    std::cout << std::endl;
+
+    Benchmarker::clear();
+
     auto start = std::chrono::high_resolution_clock::now();
     auto resDijkstra = dijkstra(g, 0);
     auto end = std::chrono::high_resolution_clock::now();
@@ -466,6 +570,8 @@ int main() {
             std::cout << "ERROR in parallel solve: " << i << ": " << resDijkstra[i] << " != " << resPara[i] << std::endl;
         if (resDijkstra[i] != resShortcuts[i]) 
             std::cout << "ERROR in shortcuts solve: " << i << ": " << resDijkstra[i] << " != " << resShortcuts[i] << std::endl;
+        if (resDijkstra[i] != resShortcutsPara[i])
+            std::cout << "ERROR in parallel shortcuts solve: " << i << ": " << resDijkstra[i] << " != " << resShortcutsPara[i] << std::endl;
     }
 
     // for (size_t i = 0; i < res.size(); i++)
