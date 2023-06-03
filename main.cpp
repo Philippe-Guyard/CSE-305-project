@@ -152,6 +152,7 @@ private:
         Q.insert(DEdge(source, source, 0));
         while (!Q.empty()) {
             Q_dash.clear();
+            Benchmarker::start_one("Computing Q_dash");
             for(auto d_edge : Q) {
                 size_t u = d_edge.from;
                 size_t v = d_edge.to;
@@ -166,6 +167,7 @@ private:
                     }
                 }
             }
+            Benchmarker::end_one("Computing Q_dash");
 
             Q.clear();
             for(auto it = Q_dash.begin(); it != Q_dash.end(); it++) {
@@ -201,8 +203,11 @@ private:
                 // as well as immediately computing minimums on insertion to Q_dash.
                 // It is ok to filter now, since the edges that do not satisfy these conditions
                 // would not be inserted into Q_dash anyway
-                double cur_best = std::fmin(found.get(edge_key), Q_dash.get(edge_key));
-                if (x + c <= sol->delta && x + c < cur_best) {
+                // double cur_best = std::fmin(found.get(edge_key), Q_dash.get(edge_key));
+                // if (x + c <= sol->delta && x + c < cur_best) {
+                //     Q_dash.insert(edge_key, x + c);
+                // }
+                if (x + c <= sol->delta && x + c < std::fmin(Q_dash.get(edge_key), found.get(edge_key))) {
                     Q_dash.insert(edge_key, x + c);
                 }
             }
@@ -218,17 +223,28 @@ private:
         while (!Q.empty()){            
             Benchmarker::start_one("Computing Q_dash");
             size_t chunk_size = Q.size() / num_threads;
+            // Make sure the extra nodes are spread evenly across threads 
+            // I am not sure this helps anyhow, but trying desperately to fix a bug...
+            size_t extra_nodes = Q.size() - chunk_size * num_threads;
+            size_t cur_begin = 0;
+            size_t cur_end = chunk_size;
             std::vector<std::thread> threads(num_threads - 1);
             for (size_t i = 0; i < num_threads - 1; i++) {
+                if (i < extra_nodes) 
+                    cur_end++;
+
                 Q_dash[i].clear();
-                threads[i] = std::thread(find_shortcuts_thread, this, std::cref(Q), i * chunk_size, 
-                                                                (i + 1) * chunk_size, std::ref(Q_dash[i]), 
+                threads[i] = std::thread(find_shortcuts_thread, this, std::cref(Q), cur_begin, 
+                                                                cur_end, std::ref(Q_dash[i]), 
                                                                 std::cref(found));
+                cur_begin = cur_end;
+                cur_end += chunk_size;
             }
             
-            size_t last_chunk_start = (num_threads - 1) * chunk_size;
             Q_dash[num_threads - 1].clear();
-            find_shortcuts_thread(this, Q, last_chunk_start, Q.size(), Q_dash[num_threads - 1], found);
+            if (cur_begin < Q.size())
+                find_shortcuts_thread(this, Q, cur_begin, Q.size(), Q_dash[num_threads - 1], found);
+
             Benchmarker::start_one("Joining");
             for(size_t i = 0; i < num_threads - 1; i++) 
                 threads[i].join();
@@ -255,7 +271,7 @@ private:
                     for(size_t j = i + 1; j < num_threads; j++) 
                         min_val = std::fmin(min_val, Q_dash[j].get(edge_key));
                     
-                    if (min_val < found.get(edge_key)) {
+                    if (min_val < found.get(edge_key) && min_val <= delta) {
                         found.insert(edge_key, min_val); 
                         Q.emplace_back(DEdge(u, v, min_val));                  
                     }
@@ -282,26 +298,30 @@ private:
             i = opt_i.value();
             for(auto it = buckets->begin_of(i); it != buckets->end_of(i); it++) {
                 vertex_t v = *it;
+                // distances[v] + e.weight <= (i + 1) * delta <=> e.weight <= (i + 1) * delta - distances[v]
+                double target_weight = (i + 1) * delta - distances[v];
                 for (const Edge &e : graph.edges_from(v)) {
-                    if (distances[v] + e.weight <= (i + 1) * delta) {
+                    if (e.weight <= target_weight) {
                         relax({e.to, distances[v] + e.weight});
                     }
                 }
                 for(const Edge& e: shortcuts_from[v]) {
-                    if (distances[v] + e.weight <= (i + 1) * delta) {
+                    if (e.weight <= target_weight) {
                         relax({e.to, distances[v] + e.weight});
                     }
                 }
             }
             for(auto it = buckets->begin_of(i); it != buckets->end_of(i); it++) {
                 vertex_t v = *it;
+                // distances[v] + e.weight > (i + 1) * delta <=> e.weight > (i + 1) * delta - distances[v]
+                double target_weight = (i + 1) * delta - distances[v];
                 for (const Edge &e : graph.edges_from(v)) {
-                    if (distances[v] + e.weight > (i + 1) * this->delta) {
+                    if (e.weight > target_weight) {
                         relax({e.to, distances[v] + e.weight});
                     }
                 }
                 for(const Edge& e: shortcuts_from[v]) {
-                    if (distances[v] + e.weight > (i + 1) * this->delta) {
+                    if (e.weight > target_weight) {
                         relax({e.to, distances[v] + e.weight});
                     }
                 }
@@ -513,9 +533,11 @@ int main() {
     // g.add_edge(F, G, 11);
     // g.add_edge(G, H, 15);
 
-    const size_t N = 5000;
-    Graph g = GraphGenerator::make_random_connected_graph(N);
-    std::cout << "G has " << g.num_vertices() << " vertices and " << g.num_edges() << " edges" << std::endl;
+    const size_t N = 10000;
+    const double p = 0.25;
+    Graph g = GraphGenerator::make_random_connected_graph(N, p);
+    std::cout << "G has " << g.num_vertices() << " vertices and " << g.num_edges() << " edges";
+    std::cout << "(random graph with p = " << p << ") " << std::endl;
     std::cout << std::endl;
 
     const double delta = 0.1;
