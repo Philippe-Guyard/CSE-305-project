@@ -277,12 +277,13 @@ private:
         return true;
     }
 public:
-    static Graph make_random_graph(int n = -1)
+    /*
+    * Generates a random graph with n vertices.
+    * The weights of the edges are generated randomly as numbers between 0 and 1.
+    * Every edge has probability p of appearing in the graph.
+    */
+    static Graph make_random_graph(int n = -1, double p = 0.5)
     {
-        // Generates a completely random graph with exactly
-        // n vertices. Every edge has exactly probability
-        // 1/2 of appearing in the graph. For all edges in the graph,
-        // weights are generated randomly as number between 0 and 1
         const int MAX_N = 1e5;
         if (n < 0)
             n = (int)(uniform(engine) * MAX_N);
@@ -298,7 +299,7 @@ public:
                 if (u == v)
                     continue;
 
-                if (uniform(engine) > 0.5)
+                if (uniform(engine) < p)
                     g.add_edge(u, v, uniform(engine));
             }
         }
@@ -306,14 +307,20 @@ public:
         return g;
     }
 
-    static Graph make_random_connected_graph(int n = -1) {
-        Graph g = make_random_graph(n);
-        const size_t EDGES_PER_ITER = 10;
+    /*
+    * Same as make_random_graph, but ensures that the graph is connected.
+    */
+    static Graph make_random_connected_graph(int n = -1, double p = 0.5) {
+        Graph g = make_random_graph(n, p);
+        n = g.num_vertices();
+        // One edge every for every 10 000 possible 
+        size_t edges_per_iter = (n * n) / 10000 + 1;
 
+        // Avoid checking connectedness too often, as it can be expensive 
         while (!is_connected(g)) {
-            // Add 10 random edges to g until it is connected
+            // Add random edges to g until it is connected
             size_t edges_added = 0;
-            while (edges_added < EDGES_PER_ITER) {
+            while (edges_added < edges_per_iter) {
                 vertex_t v = (vertex_t)(uniform(engine) * n);
                 vertex_t u = (vertex_t)(uniform(engine) * n);
                 if (v == u || g.has_edge(v, u)) {
