@@ -108,74 +108,50 @@ public:
     }
 
     // Random uniform sparse graphs, i.e same as above but the maximum degree of a node (= # of outgoing edges) is <= a given d
-    static Graph make_random_sparse_graph(int n = -1, int max_degree = 3, double p = 0.5)
+    static Graph make_random_sparse_graph(int n = -1, int max_degree = -1, double p = 0.5)
     {
-        Graph g = make_random_graph(n, p);
-        n = g.num_vertices();
+        if (n == -1 || max_degree == -1)
+            throw std::invalid_argument("Invalid input parameters");
 
-        // Iterate through each vertex in the graph.
-        for (vertex_t v = 0; v < n; v++)
+        Graph g(n);
+
+        std::vector<vertex_t> nodes(n);
+        std::iota(nodes.begin(), nodes.end(), 0); // Fill the nodes vector with values from 0 to n-1
+
+        for (vertex_t v = 0; v < n; ++v)
         {
-            // If the degree of the vertex exceeds the maximum allowed degree, remove edges until it doesn't.
-            while (g.degree(v) > max_degree)
+            std::shuffle(nodes.begin(), nodes.end(), engine); // Shuffle the nodes
+            for (vertex_t u : nodes)
             {
-                // Get the list of edges from vertex v.
-                auto edges = g.edges(v);
-
-                // Randomly select an edge to remove.
-                int index_to_remove = (int)(uniform(engine) * edges.size());
-
-                // Remove the edge.
-                g.remove_edge(v, edges[index_to_remove]);
-            }
-        }
-
-        // Now, we have a sparse graph but it may not be connected. Let's connect it using a similar method to before.
-
-        // One edge every for every 10 000 possible
-        size_t edges_per_iter = (n * n) / 10000 + 1;
-
-        // Avoid checking connectedness too often, as it can be expensive
-        while (!is_connected(g))
-        {
-            // Add random edges to g until it is connected
-            size_t edges_added = 0;
-            while (edges_added < edges_per_iter)
-            {
-                vertex_t v = (vertex_t)(uniform(engine) * n);
-                vertex_t u = (vertex_t)(uniform(engine) * n);
-                if (v == u || g.has_edge(v, u) || g.degree(v) >= max_degree || g.degree(u) >= max_degree)
+                if (v != u && !g.has_edge(v, u) && g.edges_from(v).size() < max_degree && g.edges_from(u).size() < max_degree)
                 {
-                    continue;
+                    g.add_edge(v, u, uniform(engine));
                 }
-
-                g.add_edge(v, u, uniform(engine));
-                edges_added++;
+                if (g.edges_from(v).size() >= max_degree)
+                    break;
             }
         }
 
         return g;
     }
 
-    static Graph make_random_dense_graph(int n = -1, int min_degree = 10, double p = 0.5, double p_dense = 0.1)
+    static Graph make_random_dense_graph(int n = -1, int min_degree = -1, double p = 0.5, double p_dense = 0.1)
     {
         Graph g = make_random_graph(n, p);
         n = g.num_vertices();
 
         // Subset of vertices which should have high degree
-        int dense_node_count = n * p_dense; // p_dense*100% of the nodes will be dense
+        int dense_node_count = n / 10; // 10% of the nodes will be dense
         std::vector<vertex_t> dense_nodes(dense_node_count);
 
-        // Initialize dense_nodes with first 'dense_node_count' vertices
         for (int i = 0; i < dense_node_count; i++)
         {
             dense_nodes[i] = i;
         }
 
-        // For each node in the subset, ensure it has at least 'min_degree' edges
         for (vertex_t v : dense_nodes)
         {
-            while (g.degree(v) < min_degree)
+            while (g.edges_from(v).size() < min_degree)
             {
                 // Add edges from v to other random vertices until its degree is 'min_degree'
                 while (true)
