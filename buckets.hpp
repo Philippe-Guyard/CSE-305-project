@@ -25,7 +25,7 @@ public:
         return size() == 0;
     }
 
-    virtual std::optional<size_t> first_non_empty_bucket() const {}
+    virtual std::optional<size_t> first_non_empty_bucket(int min_i = -1) const {}
 
     virtual void insert(size_t bucket_idx, const vertex_t& v) {
         ++total_elements;
@@ -62,8 +62,8 @@ public:
         buckets = std::vector<bucket_t>(DEFAULT_BUCKETS);
     }
 
-    std::optional<size_t> first_non_empty_bucket() const override {
-        for (size_t i = 0; i < buckets.size(); i++)
+    std::optional<size_t> first_non_empty_bucket(int min_i = -1) const override {
+        for (int i = min_i + 1; i < buckets.size(); i++)
         {
             if (!buckets[i].empty())
             {
@@ -111,11 +111,13 @@ private:
 public: 
     PrioritizedBucketList() : BucketListBase() {}
 
-    std::optional<size_t> first_non_empty_bucket() const override {
-        if (buckets.empty()) {
+    std::optional<size_t> first_non_empty_bucket(int min_i = -1) const override {
+        auto it = buckets.lower_bound(min_i + 1);
+        if (it == buckets.end()) {
             return std::nullopt;
         }
-        return buckets.begin()->first;
+
+        return it->first;
     }
 
     void insert(size_t bucket_idx, const vertex_t& v) override {
