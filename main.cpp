@@ -623,17 +623,17 @@ int main()
     // g.add_edge(F, G, 11);
     // g.add_edge(G, H, 15);
 
-    const size_t N = 1000;
+    const size_t N = 50000;
     const double p = 0.5;
-    const int max_degree = 300;
+    const int max_degree = 3000;
     const int min_degree = 8000;
     const double p_dense = 0.1;
     // choose between
     // make_random_graph(N, p) tested
     // make_random_connected_graph(N,  p) tested
-    // make_random_sparse_graph(N,  max_degree, p)
+    // make_random_sparse_graph(N, p, max_degree,)
     // make_random_dense_graph(N, min_degree ,  p,  p_dense) tested
-    Graph g = GraphGenerator::make_random_sparse_graph(N, max_degree, p);
+    Graph g = GraphGenerator::make_random_sparse_graph(N, p, max_degree);
     std::cout
         << "G has " << g.num_vertices() << " vertices and " << g.num_edges() << " edges";
     std::cout << "(random graph with p = " << p << ") " << std::endl;
