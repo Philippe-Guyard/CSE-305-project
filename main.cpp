@@ -6,6 +6,7 @@
 #include <unordered_set>
 #include <vector>
 #include <memory>
+#include <omp.h>
 
 #include "buckets.hpp"
 #include "dijkstra.cpp"
@@ -144,6 +145,65 @@ private:
 
         Benchmarker::end_one("find_requests_parallel");
         return std::move(res);
+    }
+
+    /*
+    * Same as find_requests_parallel, but using OpenMP
+    */
+    template <typename Iterator>
+    std::vector<Edge> find_requests_omp(Iterator begin, Iterator end, edge_type kind, size_t num_threads) {
+        Benchmarker::start_one("find_requests_omp");
+        std::vector<vertex_t> R_vec(begin, end);
+        std::vector<std::vector<Edge>> results(num_threads);        
+        #pragma omp parallel for shared(R_vec, results) num_threads(num_threads) schedule(dynamic)
+        for(size_t j = 0; j < R_vec.size(); ++j) {
+            vertex_t v = R_vec[j];
+            size_t thread_id = omp_get_thread_num();
+            for (const Edge &e : graph.edges_from(v))
+            {
+                // Small optimization compared to the paper: we check the distances before pushing them to the vector
+                // To avoid iterating over useless distances and calling relax too many times
+                if (edge_is_kind(e, kind) && e.weight + distances[v] < distances[e.to])
+                {
+                    results[thread_id].push_back({e.to, e.weight + distances[v]});
+                }
+            }
+        }
+
+        std::vector<Edge> res;
+        for (size_t i = 0; i < num_threads; ++i) {
+            res.insert(res.end(), results[i].begin(), results[i].end());
+        }
+
+        Benchmarker::end_one("find_requests_omp");
+        return std::move(res);
+    }
+
+    template <typename ReqFunc> 
+    void solve_base(vertex_t source, double delta, ReqFunc get_requests) {
+        this->delta = delta;
+        distances = dist_vector(graph.num_vertices(), std::numeric_limits<double>::infinity());
+        buckets->clear();
+        relax({source, 0});
+        while (!buckets->empty())
+        {
+            auto opt_i = buckets->first_non_empty_bucket();
+            if (!opt_i.has_value())
+            {
+                break;
+            }
+            int i = opt_i.value();
+            bucket_t R;
+            while (buckets->size_of(i) > 0)
+            {
+                auto requests = get_requests(buckets->begin_of(i), buckets->end_of(i), edge_type::light);
+                R.insert(buckets->begin_of(i), buckets->end_of(i));
+                buckets->clear_at(i);
+                relax_requests(requests);
+            }
+            auto requests = get_requests(R.begin(), R.end(), edge_type::heavy);
+            relax_requests(requests);
+        }
     }
 
     void relax_requests(const std::vector<Edge> &requests)
@@ -328,6 +388,69 @@ private:
         return shortcuts_from;
     }
 
+    /*
+    * Same as find_shortcuts_parallel, but using OpenMP instead of std::thread
+    */
+    shortcut_array find_shortcuts_omp(vertex_t source) {
+        Benchmarker::start_one("find_shortcuts_omp");
+        HashArray<UEdge, double> found(std::numeric_limits<double>::infinity());
+        std::vector<DEdge> Q;
+        // Immediately set the default to delta, since edges < delta are not interesting to us 
+        std::vector<HashArray<UEdge, double>> Q_dash(omp_get_max_threads(), HashArray<UEdge, double>(this->delta));
+        Q.push_back(DEdge(source, source, 0));
+        while(!Q.empty()) {
+            Benchmarker::start_one("Computing Q_dash");
+            #pragma omp parallel shared(Q, Q_dash)
+            {
+                #pragma omp for schedule(dynamic)
+                for(size_t i = 0; i < Q.size(); ++i) {
+                    size_t thread_id = omp_get_thread_num();
+                    for (auto edge : graph.edges_from(Q[i].to))
+                    {
+                        double new_cost = Q[i].weight + edge.weight;
+                        auto edge_key = UEdge(Q[i].from, edge.to);
+                        if (new_cost <= Q_dash[thread_id].get(edge_key))
+                        {
+                            Q_dash[thread_id].insert(edge_key, new_cost);
+                        }
+                    }
+                }
+            }
+            Benchmarker::end_one("Computing Q_dash");
+
+            Q.clear();
+            Benchmarker::start_one("Updating Q");
+            HashArray<UEdge, bool> visited(false);
+            for (size_t i = 0; i < Q_dash.size(); ++i) {
+                for (auto it = Q_dash[i].begin(); it != Q_dash[i].end(); it++)
+                {
+                    vertex_t u = it->first.from;
+                    vertex_t v = it->first.to;
+                    auto edge_key = UEdge(u, v);
+                    if (visited.get(edge_key))
+                        continue;
+
+                    visited.insert(edge_key, true);
+                    double min_val = it->second;
+                    for (size_t j = i + 1; j < Q_dash.size(); j++)
+                        min_val = std::fmin(min_val, Q_dash[j].get(edge_key));
+
+                    if (min_val < found.get(edge_key) && min_val <= delta)
+                    {
+                        found.insert(edge_key, min_val);
+                        Q.emplace_back(DEdge(u, v, min_val));
+                    }
+                }
+
+                Q_dash[i].clear();
+            }
+            Benchmarker::end_one("Updating Q");
+        }
+
+        Benchmarker::end_one("find_shortcuts_omp");
+        return to_shortcut_array(found);
+    }
+
     void solve_shortcuts_base(shortcut_array &shortcuts_from, vertex_t source)
     {
         distances = dist_vector(graph.num_vertices(), std::numeric_limits<double>::infinity());
@@ -383,7 +506,6 @@ private:
             }
         }
     }
-
 public:
     // Idk why I do it like this, architecture is weird...
     DeltaSteppingSolver(const Graph &g, bool use_simple = true) : graph(g)
@@ -396,62 +518,23 @@ public:
 
     dist_vector solve(vertex_t source, double delta)
     {
-        // Implement the sequential delta-stepping algorithm as described in section 2 of
-        // https://reader.elsevier.com/reader/sd/pii/S0196677403000762?token=DBD927418ED5D4C911A1BF7217666F8DFE7446018FE2D1892A519D20FADCBE4A95A45FB4E44FD74C8BFD946BEE125078&originRegion=eu-west-1&originCreation=20230506110955
-        this->delta = delta;
-        distances = dist_vector(graph.num_vertices(), std::numeric_limits<double>::infinity());
-        buckets->clear();
-        relax({source, 0});
-        while (!buckets->empty())
-        {
-            auto opt_i = buckets->first_non_empty_bucket();
-            if (!opt_i.has_value())
-            {
-                break;
-            }
-            int i = opt_i.value();
-            bucket_t R;
-            while (buckets->size_of(i) > 0)
-            {
-                auto requests = find_requests(buckets->begin_of(i), buckets->end_of(i), light);
-                R.insert(buckets->begin_of(i), buckets->end_of(i));
-                buckets->clear_at(i);
-                relax_requests(requests);
-            }
-            auto requests = find_requests(R.begin(), R.end(), heavy);
-            relax_requests(requests);
-        }
-
+        solve_base(source, delta, [this](auto begin, auto end, auto kind) { return find_requests(begin, end, kind); });
         return distances;
     }
 
     // Same as above, but use the improvement from section 4 for faster requests findings
     dist_vector solve_parallel_simple(vertex_t source, double delta, size_t num_threads)
     {
-        this->delta = delta;
-        distances = dist_vector(graph.num_vertices(), std::numeric_limits<double>::infinity());
-        buckets->clear();
-        relax({source, 0});
-        while (true)
-        {
-            auto opt_i = buckets->first_non_empty_bucket();
-            if (!opt_i.has_value())
-            {
-                break;
-            }
-            int i = opt_i.value();
-            bucket_t R;
-            while (buckets->size_of(i) > 0)
-            {
-                auto requests = find_requests_parallel(buckets->begin_of(i), buckets->end_of(i), light, num_threads);
-                R.insert(buckets->begin_of(i), buckets->end_of(i));
-                buckets->clear_at(i);
-                relax_requests(requests);
-            }
-            auto requests = find_requests_parallel(R.begin(), R.end(), heavy, num_threads);
-            relax_requests(requests);
-        }
+        solve_base(source, delta, [this, num_threads](auto begin, auto end, auto kind) {
+            return find_requests_parallel(begin, end, kind, num_threads); 
+        });
+        return distances;
+    }
 
+    dist_vector solve_parallel_omp(vertex_t source, double delta, size_t num_threads) {
+        solve_base(source, delta, [this, num_threads](auto begin, auto end, auto kind) {
+             return find_requests_omp(begin, end, kind, num_threads);
+        });
         return distances;
     }
 
@@ -467,6 +550,13 @@ public:
     {
         this->delta = delta;
         auto shortcuts_from = find_shortcuts_parallel(source, num_threads);
+        solve_shortcuts_base(shortcuts_from, source);
+        return distances;
+    }
+
+    dist_vector solve_shortcuts_omp(vertex_t source, double delta) {
+        this->delta = delta;
+        auto shortcuts_from = find_shortcuts_omp(source);
         solve_shortcuts_base(shortcuts_from, source);
         return distances;
     }
@@ -623,9 +713,9 @@ int main()
     // g.add_edge(F, G, 11);
     // g.add_edge(G, H, 15);
 
-    const size_t N = 50000;
-    const double p = 0.5;
-    const int max_degree = 3000;
+    const size_t N = 10000;
+    const double p = 0.2;
+    const int max_degree = 300;
     const int min_degree = 8000;
     const double p_dense = 0.1;
     // choose between
@@ -633,7 +723,7 @@ int main()
     // make_random_connected_graph(N,  p) tested
     // make_random_sparse_graph(N, p, max_degree,)
     // make_random_dense_graph(N, min_degree ,  p,  p_dense) tested
-    Graph g = GraphGenerator::make_random_sparse_graph(N, p, max_degree);
+    Graph g = GraphGenerator::make_random_connected_graph(N, p);
     std::cout
         << "G has " << g.num_vertices() << " vertices and " << g.num_edges() << " edges";
     std::cout << "(random graph with p = " << p << ") " << std::endl;
@@ -662,6 +752,15 @@ int main()
     Benchmarker::clear();
 
     Benchmarker::start_one("Total");
+    auto resOmp = solver.solve_parallel_omp(0, delta, num_threads);
+    Benchmarker::end_one("Total");
+    std::cout << "OMP (with " << num_threads << " threads) benchmarking summary:" << std::endl;
+    Benchmarker::print_summary(std::cout);
+    std::cout << std::endl;
+
+    Benchmarker::clear();
+
+    Benchmarker::start_one("Total");
     auto resShortcuts = solver.solve_shortcuts(0, delta);
     Benchmarker::end_one("Total");
     std::cout << "Sequential with shortcuts (delta = " << delta << ") benchmarking summary:" << std::endl;
@@ -679,6 +778,13 @@ int main()
 
     Benchmarker::clear();
 
+    Benchmarker::start_one("Total");
+    auto resShortcutsOmp = solver.solve_shortcuts_omp(0, delta);
+    Benchmarker::end_one("Total");
+    std::cout << "OMP with shortcuts benchmarking summary:" << std::endl;
+    Benchmarker::print_summary(std::cout);
+    std::cout << std::endl;
+
     auto start = std::chrono::high_resolution_clock::now();
     auto resDijkstra = dijkstra(g, 0);
     auto end = std::chrono::high_resolution_clock::now();
@@ -694,6 +800,10 @@ int main()
             std::cout << "ERROR in shortcuts solve: " << i << ": " << resDijkstra[i] << " != " << resShortcuts[i] << std::endl;
         if (resDijkstra[i] != resShortcutsPara[i])
             std::cout << "ERROR in parallel shortcuts solve: " << i << ": " << resDijkstra[i] << " != " << resShortcutsPara[i] << std::endl;
+        if (resDijkstra[i] != resOmp[i])
+            std::cout << "ERROR in omp solve: " << i << ": " << resDijkstra[i] << " != " << resOmp[i] << std::endl;
+        if (resDijkstra[i] != resShortcutsOmp[i])
+            std::cout << "ERROR in omp shortcuts solve: " << i << ": " << resDijkstra[i] << " != " << resShortcutsOmp[i] << std::endl;
     }
 
     // for (size_t i = 0; i < res.size(); i++)
