@@ -232,43 +232,7 @@ public:
 
         return g;
     }
-
-    /*
-     * Generates a random city graph with n^2 vertices.
-     * The city is represented as a grid, where each node represents an intersection, and edges represent streets.
-     */
-    // static Graph make_random_city_graph(int n = -1)
-    // {
-    //     Graph g(n * n);
-
-    //     // Connect each node with its neighbors to the right and below
-    //     for (int i = 0; i < n; ++i)
-    //     {
-    //         for (int j = 0; j < n; ++j)
-    //         {
-    //             vertex_t v = i * n + j;
-
-    //             if (j < n - 1) // Connect with the node to the right
-    //             {
-    //                 vertex_t u = v + 1;
-    //                 g.add_edge(v, u, uniform(engine));
-    //                 g.add_edge(u, v, uniform(engine));
-    //             }
-
-    //             if (i < n - 1) // Connect with the node below
-    //             {
-    //                 vertex_t u = v + n;
-    //                 g.add_edge(v, u, uniform(engine));
-    //                 g.add_edge(u, v, uniform(engine));
-    //             }
-    //         }
-    //     }
-
-    //     return g;
-    // }
 };
 
 std::default_random_engine GraphGenerator::engine;
 std::uniform_real_distribution<double> GraphGenerator::uniform(0, 1);
-
-//  Random city graphs

@@ -34,7 +34,7 @@ void run_tests(Graph g, double p)
 
     Benchmarker::clear();
 
-    size_t num_threads = 8;
+    size_t num_threads = 16;
     Benchmarker::start_one("Total");
     auto resPara = solver.solve_parallel_simple(0, delta, num_threads);
     Benchmarker::end_one("Total");
@@ -144,7 +144,7 @@ int main()
     // Graph g = GraphGenerator::make_random_sparse_graph(N, max_degree, p, p_sparse);
 
     // List of graph sizes to test
-    std::vector<int> graph_sizes = {25000};
+    std::vector<int> graph_sizes = {10000, 20000, 30000};
 
     // Parameters for the graphs
     double p = 0.2;
