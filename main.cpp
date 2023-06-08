@@ -148,15 +148,17 @@ private:
     }
 
     /*
-    * Same as find_requests_parallel, but using OpenMP
-    */
+     * Same as find_requests_parallel, but using OpenMP
+     */
     template <typename Iterator>
-    std::vector<Edge> find_requests_omp(Iterator begin, Iterator end, edge_type kind, size_t num_threads) {
+    std::vector<Edge> find_requests_omp(Iterator begin, Iterator end, edge_type kind, size_t num_threads)
+    {
         Benchmarker::start_one("find_requests_omp");
         std::vector<vertex_t> R_vec(begin, end);
-        std::vector<std::vector<Edge>> results(num_threads);        
-        #pragma omp parallel for shared(R_vec, results) num_threads(num_threads) schedule(dynamic)
-        for(size_t j = 0; j < R_vec.size(); ++j) {
+        std::vector<std::vector<Edge>> results(num_threads);
+#pragma omp parallel for shared(R_vec, results) num_threads(num_threads) schedule(dynamic)
+        for (size_t j = 0; j < R_vec.size(); ++j)
+        {
             vertex_t v = R_vec[j];
             size_t thread_id = omp_get_thread_num();
             for (const Edge &e : graph.edges_from(v))
@@ -171,7 +173,8 @@ private:
         }
 
         std::vector<Edge> res;
-        for (size_t i = 0; i < num_threads; ++i) {
+        for (size_t i = 0; i < num_threads; ++i)
+        {
             res.insert(res.end(), results[i].begin(), results[i].end());
         }
 
@@ -179,8 +182,9 @@ private:
         return std::move(res);
     }
 
-    template <typename ReqFunc> 
-    void solve_base(vertex_t source, double delta, ReqFunc get_requests) {
+    template <typename ReqFunc>
+    void solve_base(vertex_t source, double delta, ReqFunc get_requests)
+    {
         this->delta = delta;
         distances = dist_vector(graph.num_vertices(), std::numeric_limits<double>::infinity());
         buckets->clear();
@@ -389,21 +393,24 @@ private:
     }
 
     /*
-    * Same as find_shortcuts_parallel, but using OpenMP instead of std::thread
-    */
-    shortcut_array find_shortcuts_omp(vertex_t source) {
+     * Same as find_shortcuts_parallel, but using OpenMP instead of std::thread
+     */
+    shortcut_array find_shortcuts_omp(vertex_t source)
+    {
         Benchmarker::start_one("find_shortcuts_omp");
         HashArray<UEdge, double> found(std::numeric_limits<double>::infinity());
         std::vector<DEdge> Q;
-        // Immediately set the default to delta, since edges < delta are not interesting to us 
+        // Immediately set the default to delta, since edges < delta are not interesting to us
         std::vector<HashArray<UEdge, double>> Q_dash(omp_get_max_threads(), HashArray<UEdge, double>(this->delta));
         Q.push_back(DEdge(source, source, 0));
-        while(!Q.empty()) {
+        while (!Q.empty())
+        {
             Benchmarker::start_one("Computing Q_dash");
-            #pragma omp parallel shared(Q, Q_dash)
+#pragma omp parallel shared(Q, Q_dash)
             {
-                #pragma omp for schedule(dynamic)
-                for(size_t i = 0; i < Q.size(); ++i) {
+#pragma omp for schedule(dynamic)
+                for (size_t i = 0; i < Q.size(); ++i)
+                {
                     size_t thread_id = omp_get_thread_num();
                     for (auto edge : graph.edges_from(Q[i].to))
                     {
@@ -421,7 +428,8 @@ private:
             Q.clear();
             Benchmarker::start_one("Updating Q");
             HashArray<UEdge, bool> visited(false);
-            for (size_t i = 0; i < Q_dash.size(); ++i) {
+            for (size_t i = 0; i < Q_dash.size(); ++i)
+            {
                 for (auto it = Q_dash[i].begin(); it != Q_dash[i].end(); it++)
                 {
                     vertex_t u = it->first.from;
@@ -506,6 +514,7 @@ private:
             }
         }
     }
+
 public:
     // Idk why I do it like this, architecture is weird...
     DeltaSteppingSolver(const Graph &g, bool use_simple = true) : graph(g)
@@ -518,23 +527,23 @@ public:
 
     dist_vector solve(vertex_t source, double delta)
     {
-        solve_base(source, delta, [this](auto begin, auto end, auto kind) { return find_requests(begin, end, kind); });
+        solve_base(source, delta, [this](auto begin, auto end, auto kind)
+                   { return find_requests(begin, end, kind); });
         return distances;
     }
 
     // Same as above, but use the improvement from section 4 for faster requests findings
     dist_vector solve_parallel_simple(vertex_t source, double delta, size_t num_threads)
     {
-        solve_base(source, delta, [this, num_threads](auto begin, auto end, auto kind) {
-            return find_requests_parallel(begin, end, kind, num_threads); 
-        });
+        solve_base(source, delta, [this, num_threads](auto begin, auto end, auto kind)
+                   { return find_requests_parallel(begin, end, kind, num_threads); });
         return distances;
     }
 
-    dist_vector solve_parallel_omp(vertex_t source, double delta, size_t num_threads) {
-        solve_base(source, delta, [this, num_threads](auto begin, auto end, auto kind) {
-             return find_requests_omp(begin, end, kind, num_threads);
-        });
+    dist_vector solve_parallel_omp(vertex_t source, double delta, size_t num_threads)
+    {
+        solve_base(source, delta, [this, num_threads](auto begin, auto end, auto kind)
+                   { return find_requests_omp(begin, end, kind, num_threads); });
         return distances;
     }
 
@@ -554,7 +563,8 @@ public:
         return distances;
     }
 
-    dist_vector solve_shortcuts_omp(vertex_t source, double delta) {
+    dist_vector solve_shortcuts_omp(vertex_t source, double delta)
+    {
         this->delta = delta;
         auto shortcuts_from = find_shortcuts_omp(source);
         solve_shortcuts_base(shortcuts_from, source);
@@ -713,17 +723,18 @@ int main()
     // g.add_edge(F, G, 11);
     // g.add_edge(G, H, 15);
 
-    const size_t N = 10000;
-    const double p = 0.2;
-    const int max_degree = 300;
-    const int min_degree = 8000;
-    const double p_dense = 0.1;
+    const size_t N = 30000;
+    const double p = 0.1;
+    const int max_degree = 0.4 * N;
+    const int min_degree = 0.8 * N;
+    const double p_dense = 0.01;
+    const double p_sparse = 0.03;
     // choose between
     // make_random_graph(N, p) tested
     // make_random_connected_graph(N,  p) tested
-    // make_random_sparse_graph(N, p, max_degree,)
+    // make_random_sparse_graph(N, p, max_degree,) tested
     // make_random_dense_graph(N, min_degree ,  p,  p_dense) tested
-    Graph g = GraphGenerator::make_random_connected_graph(N, p);
+    Graph g = GraphGenerator::make_random_sparse_graph(N, max_degree, p, p_sparse);
     std::cout
         << "G has " << g.num_vertices() << " vertices and " << g.num_edges() << " edges";
     std::cout << "(random graph with p = " << p << ") " << std::endl;
@@ -741,7 +752,7 @@ int main()
 
     Benchmarker::clear();
 
-    size_t num_threads = 20;
+    size_t num_threads = 16;
     Benchmarker::start_one("Total");
     auto resPara = solver.solve_parallel_simple(0, delta, num_threads);
     Benchmarker::end_one("Total");
