@@ -693,48 +693,9 @@ public:
     }
 };
 
-int main()
+void run_tests(Graph g, double p)
 {
-    /*
-           C -> D -> I
-          /           \
-    A -> B             G -> H
-          \           /
-           E -> F-----
-    */
-
-    // Graph g(9);
-    // vertex_t A = 0;
-    // vertex_t B = 1;
-    // vertex_t C = 2;
-    // vertex_t D = 3;
-    // vertex_t E = 4;
-    // vertex_t F = 5;
-    // vertex_t G = 6;
-    // vertex_t H = 7;
-    // vertex_t I = 8;
-    // g.add_edge(A, B, 2);
-    // g.add_edge(B, C, 4);
-    // g.add_edge(C, D, 5);
-    // g.add_edge(D, I, 7);
-    // g.add_edge(I, G, 8);
-    // g.add_edge(B, E, 20);
-    // g.add_edge(E, F, 3);
-    // g.add_edge(F, G, 11);
-    // g.add_edge(G, H, 15);
-
-    const size_t N = 30000;
-    const double p = 0.1;
-    const int max_degree = 0.4 * N;
-    const int min_degree = 0.8 * N;
-    const double p_dense = 0.01;
-    const double p_sparse = 0.03;
-    // choose between
-    // make_random_graph(N, p) tested
-    // make_random_connected_graph(N,  p) tested
-    // make_random_sparse_graph(N, p, max_degree,) tested
-    // make_random_dense_graph(N, min_degree ,  p,  p_dense) tested
-    Graph g = GraphGenerator::make_random_sparse_graph(N, max_degree, p, p_sparse);
+    // Run the tests on the graph
     std::cout
         << "G has " << g.num_vertices() << " vertices and " << g.num_edges() << " edges";
     std::cout << "(random graph with p = " << p << ") " << std::endl;
@@ -752,7 +713,7 @@ int main()
 
     Benchmarker::clear();
 
-    size_t num_threads = 16;
+    size_t num_threads = 8;
     Benchmarker::start_one("Total");
     auto resPara = solver.solve_parallel_simple(0, delta, num_threads);
     Benchmarker::end_one("Total");
@@ -815,6 +776,73 @@ int main()
             std::cout << "ERROR in omp solve: " << i << ": " << resDijkstra[i] << " != " << resOmp[i] << std::endl;
         if (resDijkstra[i] != resShortcutsOmp[i])
             std::cout << "ERROR in omp shortcuts solve: " << i << ": " << resDijkstra[i] << " != " << resShortcutsOmp[i] << std::endl;
+    }
+}
+
+int main()
+{
+    /*
+           C -> D -> I
+          /           \
+    A -> B             G -> H
+          \           /
+           E -> F-----
+    */
+
+    // Graph g(9);
+    // vertex_t A = 0;
+    // vertex_t B = 1;
+    // vertex_t C = 2;
+    // vertex_t D = 3;
+    // vertex_t E = 4;
+    // vertex_t F = 5;
+    // vertex_t G = 6;
+    // vertex_t H = 7;
+    // vertex_t I = 8;
+    // g.add_edge(A, B, 2);
+    // g.add_edge(B, C, 4);
+    // g.add_edge(C, D, 5);
+    // g.add_edge(D, I, 7);
+    // g.add_edge(I, G, 8);
+    // g.add_edge(B, E, 20);
+    // g.add_edge(E, F, 3);
+    // g.add_edge(F, G, 11);
+    // g.add_edge(G, H, 15);
+
+    // const size_t N = 30000;
+    // const double p = 0.2;
+    // const int max_degree = 0.3 * N;
+    // const int min_degree = 0.8 * N;
+    // const double p_dense = 0.01;
+    // const double p_sparse = 0.03;
+    // // choose between
+    // // make_random_graph(N, p) tested
+    // // make_random_connected_graph(N,  p) tested
+    // // make_random_sparse_graph(N, p, max_degree,) tested
+    // // make_random_dense_graph(N, min_degree ,  p,  p_dense) tested
+    // Graph g = GraphGenerator::make_random_sparse_graph(N, max_degree, p, p_sparse);
+
+    // List of graph sizes to test
+    std::vector<int> graph_sizes = {10000, 20000, 30000};
+
+    // Parameters for the graphs
+    double p = 0.2;
+    double p_dense = 0.01;
+    double p_sparse = 0.03;
+
+    // Run the tests for each graph size and each graph generation function
+    for (size_t N : graph_sizes)
+    {
+        const int max_degree = 0.3 * N;
+        const int min_degree = 0.8 * N;
+        Graph g_random = GraphGenerator::make_random_graph(N, p);
+        Graph g_random_connected = GraphGenerator::make_random_connected_graph(N, p);
+        Graph g_sparse = GraphGenerator::make_random_sparse_graph(N, p, max_degree, p_sparse);
+        Graph g_dense = GraphGenerator::make_random_dense_graph(N, p, min_degree, p_dense);
+        run_tests(g_random, p);
+        run_tests(g_random_connected, p);
+        run_tests(g_sparse, p);
+        run_tests(g_dense, p);
     }
 
     // for (size_t i = 0; i < res.size(); i++)
