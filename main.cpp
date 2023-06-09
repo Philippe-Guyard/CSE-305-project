@@ -12,7 +12,8 @@
 #include "graph.hpp"
 #include "benchmarker.hpp"
 #include "generator.hpp"
-#include "DeltaSteppingSolver.hpp"
+#include "solvers.hpp"
+#include "dijkstra.hpp"
 
 void run_tests(Graph g, double p)
 {
@@ -78,10 +79,28 @@ void run_tests(Graph g, double p)
     Benchmarker::print_summary(std::cout);
     std::cout << std::endl;
 
+    Benchmarker::clear();
+
+    auto solverSorted = DeltaSteppingSolverSorted(g, delta);
+
+    Benchmarker::start_one("Total");
+    auto resParaSorted = solverSorted.solve_parallel_simple(0, num_threads);
+    Benchmarker::end_one("Total");
+    std::cout << "Parallel sorted (with " << num_threads << " threads) benchmarking summary:" << std::endl;
+    Benchmarker::print_summary(std::cout);
+    std::cout << std::endl;
+
+    Benchmarker::clear();
+
     auto start = std::chrono::high_resolution_clock::now();
     auto resDijkstra = dijkstra(g, 0);
     auto end = std::chrono::high_resolution_clock::now();
     std::cout << "Dijkstra: " << std::chrono::duration_cast<std::chrono::milliseconds>(end - start).count() << "ms" << std::endl;
+
+    start = std::chrono::high_resolution_clock::now();
+    g.semisort_delta_parallel(0.1);
+    end = std::chrono::high_resolution_clock::now();
+    std::cout << "semi-sort: " << std::chrono::duration_cast<std::chrono::milliseconds>(end - start).count() << "ms" << std::endl;
 
     for (size_t i = 0; i < res.size(); i++)
     {
@@ -97,6 +116,8 @@ void run_tests(Graph g, double p)
             std::cout << "ERROR in omp solve: " << i << ": " << resDijkstra[i] << " != " << resOmp[i] << std::endl;
         if (resDijkstra[i] != resShortcutsOmp[i])
             std::cout << "ERROR in omp shortcuts solve: " << i << ": " << resDijkstra[i] << " != " << resShortcutsOmp[i] << std::endl;
+        if (resDijkstra[i] != resParaSorted[i])
+            std::cout << "ERROR in parallel sorted solve: " << i << ": " << resDijkstra[i] << " != " << resParaSorted[i] << std::endl;
     }
 }
 
@@ -158,7 +179,7 @@ int main()
     {
         const int max_degree = 0.3 * N; // poorly connected nodes are connected with up to 30% of total nodes
         const int min_degree = 0.8 * N; // well connected nodes are connected with at least 80% of total nodes
-        // Graph g_random = GraphGenerator::make_random_graph(N, p);
+        Graph g_random = GraphGenerator::make_random_graph(N, p);
         Graph g_random_connected = GraphGenerator::make_random_connected_graph(N, p);
         run_tests(g_random, p);
         run_tests(g_random_connected, p);

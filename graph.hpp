@@ -294,4 +294,22 @@ public:
 
         return blocked_adjacency_lists;
     };
+
+    std::vector<std::pair<std::vector<Edge>, std::vector<Edge>>> semisort_delta_parallel(double delta) const {
+        // For every vertex, a pair of vectors:
+        // All edges with weight < delta
+        // All edges with weight >= delta
+        std::vector<std::pair<std::vector<Edge>, std::vector<Edge>>> semisorted_edges(n);
+        #pragma omp parallel for schedule(dynamic)
+        for(vertex_t v = 0; v < n; ++v) {
+            for(auto &e : edges_from(v)) {
+                if(e.weight < delta) 
+                    semisorted_edges[v].first.push_back(e);
+                else 
+                    semisorted_edges[v].second.push_back(e);
+            }
+        }
+
+        return semisorted_edges;
+    }
 };
