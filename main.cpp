@@ -144,7 +144,7 @@ int main()
     // Graph g = GraphGenerator::make_random_sparse_graph(N, max_degree, p, p_sparse);
 
     // List of graph sizes to test
-    std::vector<int> graph_sizes = {30000};
+    std::vector<int> graph_sizes = {10000, 20000, 30000};
 
     // Parameters for the graphs
     double p = 0.2;
@@ -160,14 +160,16 @@ int main()
         const int min_degree = 0.8 * N; // well connected nodes are connected with at least 80% of total nodes
         // Graph g_random = GraphGenerator::make_random_graph(N, p);
         Graph g_random_connected = GraphGenerator::make_random_connected_graph(N, p);
-        // run_tests(g_random, p);
+        run_tests(g_random, p);
         run_tests(g_random_connected, p);
         Graph g_sparse = GraphGenerator::make_random_sparse_graph(N, p, max_degree, p_sparse);
         run_tests(g_sparse, p);
         Graph g_dense = GraphGenerator::make_random_dense_graph(N, p, min_degree, p_dense);
         run_tests(g_dense, p);
-        // Graph city = gg.make_random_city(N, p, max_degree, min_degree, p_dense, p_sparse);
-        // run_tests(city, p);
+        p_dense = 0.2;  // 20% of commercial areas
+        p_sparse = 0.1; // 10% of industrial areas
+        Graph city = gg.make_random_city(N, p, max_degree, min_degree, p_dense, p_sparse);
+        run_tests(city, p);
     }
 
     // for (size_t i = 0; i < res.size(); i++)
