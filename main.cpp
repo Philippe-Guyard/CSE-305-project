@@ -148,22 +148,26 @@ int main()
 
     // Parameters for the graphs
     double p = 0.2;
-    double p_dense = 0.01;  // probability that a node is a very connected node (i.e. 1% of nodes are dsuper connected)
-    double p_sparse = 0.03; // probability that a node is poorly connected (i.e. 3% of nodes are poorly connected)
+    double p_dense = 0.2;  // probability that a node is a very connected node (i.e. 1% of nodes are dsuper connected)
+    double p_sparse = 0.1; // probability that a node is poorly connected (i.e. 3% of nodes are poorly connected)
 
     // Run the tests for each graph size and each graph generation function
+    GraphGenerator gg;
+
     for (size_t N : graph_sizes)
     {
-        const int max_degree = 0.3 * N; // poorly connected nodes are connected with up to 30% of total nodes
-        const int min_degree = 0.8 * N; // well connected nodes are connected with at least 80% of total nodes
-        Graph g_random = GraphGenerator::make_random_graph(N, p);
-        Graph g_random_connected = GraphGenerator::make_random_connected_graph(N, p);
-        Graph g_sparse = GraphGenerator::make_random_sparse_graph(N, p, max_degree, p_sparse);
-        Graph g_dense = GraphGenerator::make_random_dense_graph(N, p, min_degree, p_dense);
-        run_tests(g_random, p);
-        run_tests(g_random_connected, p);
-        run_tests(g_sparse, p);
-        run_tests(g_dense, p);
+        const int max_degree = 0.2 * N; // poorly connected nodes are connected with up to 30% of total nodes
+        const int min_degree = 0.6 * N; // well connected nodes are connected with at least 80% of total nodes
+        // Graph g_random = GraphGenerator::make_random_graph(N, p);
+        // Graph g_random_connected = GraphGenerator::make_random_connected_graph(N, p);
+        // Graph g_sparse = GraphGenerator::make_random_sparse_graph(N, p, max_degree, p_sparse);
+        // Graph g_dense = GraphGenerator::make_random_dense_graph(N, p, min_degree, p_dense);
+        // run_tests(g_random, p);
+        // run_tests(g_random_connected, p);
+        // run_tests(g_sparse, p);
+        // run_tests(g_dense, p);
+        Graph city = gg.make_random_city(N, p, max_degree, min_degree, p_dense, p_sparse);
+        run_tests(city, p);
     }
 
     // for (size_t i = 0; i < res.size(); i++)

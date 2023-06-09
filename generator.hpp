@@ -232,6 +232,123 @@ public:
 
         return g;
     }
+
+    Graph make_random_city(int n = -1, double p = 0.2, int max_degree = -1, int min_degree = -1, double p_dense = 0.1, double p_sparse = 0.2)
+    {
+
+        // define type of nodes and their density
+        int sparse_node_count = (int)(p_sparse * n);
+        int dense_node_count = (int)(p_dense * n);
+        int regular_node_count = n - (dense_node_count + sparse_node_count);
+
+        // Initialize city graph and degrees
+        Graph city(n);
+        std::vector<int> degrees(n, 0);
+
+        // initialize vertices for each type of node
+        std::vector<vertex_t> dense_nodes(dense_node_count);
+        std::vector<vertex_t> sparse_nodes(sparse_node_count);
+        std::vector<vertex_t> regular_nodes(regular_node_count);
+
+        // Initialize union-find structure
+        UnionFind uf(n);
+
+        // Initialize these vectors with the corresponding indices
+        for (int i = 0; i < dense_node_count; i++)
+        {
+            dense_nodes[i] = i;
+        }
+
+        for (int i = 0; i < sparse_node_count; i++)
+        {
+            sparse_nodes[i] = dense_node_count + i;
+        }
+
+        for (int i = 0; i < regular_node_count; i++)
+        {
+            regular_nodes[i] = dense_node_count + sparse_node_count + i;
+        }
+
+        // handle dense nodes
+        for (vertex_t v : dense_nodes)
+        {
+            while (degrees[v] < min_degree)
+            {
+                // Add edges from v to other random vertices until its degree is 'min_degree'
+                while (true)
+                {
+                    vertex_t u = (vertex_t)(uniform(engine) * n);
+                    if (v != u && !city.has_edge(v, u))
+                    {
+                        city.add_edge(v, u, uniform(engine));
+                        degrees[v]++;
+                        degrees[u]++;
+                        uf.unite(v, u);
+                        break;
+                    }
+                }
+            }
+        }
+
+        // handle sparse nodes
+        for (vertex_t v : sparse_nodes)
+        {
+            while (degrees[v] < max_degree)
+            {
+                // Add edges from v to other random vertices until its degree is 'max_degree'
+                while (true)
+                {
+                    vertex_t u = (vertex_t)(uniform(engine) * n);
+                    if (v != u && !city.has_edge(v, u))
+                    {
+                        city.add_edge(v, u, uniform(engine));
+                        degrees[v]++;
+                        degrees[u]++;
+                        uf.unite(v, u);
+                        break;
+                    }
+                }
+            }
+        }
+
+        // handle regular nodes
+        for (vertex_t v : regular_nodes)
+        {
+            // Add edges from v to other random vertices based on probability 'p'
+            for (vertex_t u = 0; u < n; ++u)
+            {
+                if (v != u && !city.has_edge(v, u) && uniform(engine) < p)
+                {
+                    city.add_edge(v, u, uniform(engine));
+                    degrees[v]++;
+                    degrees[u]++;
+                    uf.unite(v, u);
+                }
+            }
+        }
+
+        // Ensure connectivity of the graph
+        size_t edges_per_iter = (n * n) / 10000 + 1;
+        while (uf.find(0) != uf.find(n - 1))
+        {
+            size_t edges_added = 0;
+            while (edges_added < edges_per_iter)
+            {
+                vertex_t v = (vertex_t)(uniform(engine) * n);
+                vertex_t u = (vertex_t)(uniform(engine) * n);
+                if (v == u || city.has_edge(v, u))
+                {
+                    continue;
+                }
+
+                city.add_edge(v, u, uniform(engine));
+                edges_added++;
+                uf.unite(v, u);
+            }
+        }
+
+        return city;
+    }
 };
 
 std::default_random_engine GraphGenerator::engine;
